@@ -1,0 +1,345 @@
+apply plugin: 'com.android.application'
+apply plugin: 'io.fabric'
+apply plugin: 'kotlin-android'
+apply plugin: 'kotlin-kapt'
+apply plugin: 'kotlin-android-extensions'
+
+apply from: 'rendertest.gradle'
+apply from: 'bake_caches.gradle'
+apply from: 'release_to_fabric.gradle'
+apply from: 'smartling.gradle'
+
+buildscript {
+    repositories {
+        maven { url 'https://maven.fabric.io/public' }
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'io.fabric.tools:gradle:1.25.1'
+
+        // this is required here (as well as in smartling.gradle) to allow the IDE to interpret the script properly
+        classpath 'com.smartling:smartling-api-sdk:4.0.21'
+    }
+}
+
+ext {
+    devApiUser = 'canva-dev'
+    devApiPassword = project.getProperty("devPassword")
+    stagingApiUser = 'canva-staging'
+    stagingApiPassword = project.getProperty("stagingPassword")
+
+    majorVersion = 1
+    minorVersion = 3
+    patchVersion = 0
+    buildNumber = Integer.MAX_VALUE
+}
+
+repositories {
+    maven { url 'https://maven.fabric.io/public' }
+}
+
+android {
+    compileSdkVersion androidCompileSdkVersion
+
+    defaultConfig {
+        applicationId "com.canva.editor"
+        minSdkVersion androidMinSdkVersion
+        targetSdkVersion androidTargetSdkVersion
+        versionCode = (System.getenv('BUILDKITE_BUILD_NUMBER') ?: "$buildNumber") as Integer
+        versionName "$majorVersion.$minorVersion.$patchVersion"
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+        vectorDrawables.useSupportLibrary = true
+
+        // Note: android gradle plugin 3+ reports errors if annotation processors are
+        // included on the compile path and not specified as a "annotationProcessor" which
+        // happens when using kapt so we disable that error check here.
+        // see: https://developer.android.com/studio/build/gradle-plugin-3-0-0-migration.html
+        javaCompileOptions {
+            annotationProcessorOptions {
+                includeCompileClasspath false
+            }
+        }
+
+        resConfigs 'en', 'pt', 'pt-rBR', 'de', 'in', 'es', 'es-rUS', 'b+es+419', 'es-rMX', 'fr',
+          'tr', 'it', 'pl', 'nl', 'ro', 'uk', 'en-rAU', 'en-rGB', 'vi', 'af', 'ru'
+
+        // To avoid soft/hard update check on dev build
+        applicationVariants.all { variant ->
+            if (variant.buildType.name == "dev") {
+                versionCode Integer.MAX_VALUE
+            }
+        }
+    }
+
+    signingConfigs {
+        debug {
+            // key was generated using `keytool -genkey -v -keystore etc/keystore.jks -alias debug -keyalg RSA -keysize 2048 -validity 10000`
+            storeFile file("../etc/keystore.jks")
+            keyAlias 'debug'
+            // passwords are set by setSigningConfig
+            storePassword ''
+            keyPassword ''
+        }
+        dev {
+            storeFile file("../etc/keystore.jks")
+            keyAlias 'dev'
+            // passwords are set by setSigningConfig
+            storePassword ''
+            keyPassword ''
+        }
+        release {
+            // key was generated using `keytool -genkey -v -keystore etc/keystore.jks -alias release -keyalg RSA -keysize 2048 -validity 10000`
+            storeFile file("../etc/keystore.jks")
+            keyAlias 'release'
+            // passwords are set by setSigningConfig
+            storePassword ''
+            keyPassword ''
+        }
+    }
+
+    buildTypes {
+        debug {
+            manifestPlaceholders = [branchioKey: project.getProperty("branchioDevKey")]
+            applicationIdSuffix ".debug"
+            debuggable true
+            testCoverageEnabled true
+            minifyEnabled false
+            multiDexEnabled true
+            pseudoLocalesEnabled true
+            // Disable fabric build ID generation for debug builds
+            ext.enableCrashlytics = false
+            signingConfig signingConfigs.debug
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), '../pro/proguard-rules.pro', '../pro/dontoptimize.pro'
+            testProguardFile '../pro/proguard-test-rules.pro'
+            buildConfigField 'String', 'DEV_API_USER_NAME', '"' + devApiUser + '"'
+            buildConfigField 'String', 'DEV_API_PASSWORD', '"' + devApiPassword + '"'
+            buildConfigField 'String', 'STAGING_API_USER_NAME', '"' + stagingApiUser + '"'
+            buildConfigField 'String', 'STAGING_API_PASSWORD', '"' + stagingApiPassword + '"'
+            buildConfigField 'String', 'RENDER_TEST_DIR_NAME', '"' + rendertestDirName + '"'
+            buildConfigField 'String', 'SEGMENT_WRITE_KEY', '"' + project.getProperty("segmentDevWriteKey") + '"'
+            buildConfigField 'boolean', 'CRASHLYTICS_ENABLED', 'false'
+            buildConfigField 'com.canva.app.editor.StethoHelper', 'STETHO', 'new com.canva.app.editor.StethoHelperImpl()'
+            buildConfigField 'com.canva.app.editor.TraceurHelper', 'TRACEUR', 'new com.canva.app.editor.TraceurHelperImpl()'
+            buildConfigField 'String', 'BUILD_NUMBER', '"debug"'
+            buildConfigField 'String', 'APPBOY_API_KEY', '"c57be72e-78c2-4783-a226-f3a8de53c7fb"'
+        }
+        dev {
+            manifestPlaceholders = [branchioKey: project.getProperty("branchioDevKey")]
+            applicationIdSuffix ".dev"
+            ext.betaDistributionGroupAliases = "devs, designers, testers"
+            debuggable false
+            minifyEnabled true
+            pseudoLocalesEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../pro/proguard-rules.pro', '../pro/optimize.pro'
+            signingConfig signingConfigs.dev
+            buildConfigField 'String', 'DEV_API_USER_NAME', '"' + devApiUser + '"'
+            buildConfigField 'String', 'DEV_API_PASSWORD', '"' + devApiPassword + '"'
+            buildConfigField 'String', 'STAGING_API_USER_NAME', '"' + stagingApiUser + '"'
+            buildConfigField 'String', 'STAGING_API_PASSWORD', '"' + stagingApiPassword + '"'
+            buildConfigField 'String', 'SEGMENT_WRITE_KEY', '"' + project.getProperty("segmentDevWriteKey") + '"'
+            buildConfigField 'boolean', 'CRASHLYTICS_ENABLED', 'true'
+            buildConfigField 'com.canva.app.editor.StethoHelper', 'STETHO', 'new com.canva.app.editor.NoopStethoHelper()'
+            buildConfigField 'com.canva.app.editor.TraceurHelper', 'TRACEUR', 'new com.canva.app.editor.NoopTraceurHelper()'
+            buildConfigField 'String', 'BUILD_NUMBER', '"' + buildNumber() + '"'
+            buildConfigField 'String', 'APPBOY_API_KEY', '"edb70c7a-090b-438a-8f05-c01ffe29066f"'
+            matchingFallbacks = ['release']
+        }
+        release {
+            manifestPlaceholders = [branchioKey: project.getProperty("branchioReleaseKey")]
+            ext.betaDistributionGroupAliases = "devs, designers, testers"
+            debuggable false
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../pro/proguard-rules.pro', '../pro/optimize.pro'
+            signingConfig signingConfigs.release
+            buildConfigField 'String', 'DEV_API_USER_NAME', '""'
+            buildConfigField 'String', 'DEV_API_PASSWORD', '""'
+            buildConfigField 'String', 'STAGING_API_USER_NAME', '""'
+            buildConfigField 'String', 'STAGING_API_PASSWORD', '""'
+            buildConfigField 'String', 'SEGMENT_WRITE_KEY', '"' + project.getProperty("segmentReleaseWriteKey") + '"'
+            buildConfigField 'boolean', 'CRASHLYTICS_ENABLED', 'true'
+            buildConfigField 'com.canva.app.editor.StethoHelper', 'STETHO', 'new com.canva.app.editor.NoopStethoHelper()'
+            buildConfigField 'com.canva.app.editor.TraceurHelper', 'TRACEUR', 'new com.canva.app.editor.NoopTraceurHelper()'
+            buildConfigField 'String', 'BUILD_NUMBER', '"' + buildNumber() + '"'
+            buildConfigField 'String', 'APPBOY_API_KEY', '"917af636-72da-4af0-b1a3-5f339d4ce5eb"'
+        }
+    }
+
+    dexOptions {
+        preDexLibraries true
+    }
+
+    compileOptions {
+        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_1_8
+    }
+
+    dataBinding {
+        enabled true
+    }
+
+    // Jackson transformResourcesWithMergeJavaResForDebug Build Error
+    packagingOptions {
+        exclude 'META-INF/LICENSE'
+    }
+
+    sourceSets {
+        debug {
+            java.srcDirs += 'src/debugDev/java'
+            java.srcDirs += 'src/debug/java'
+        }
+        dev {
+            // we cannot include stetho as a dependency on dev as stetho has proguard rules
+            // that keep the library, therefore we split common classes to dev and debug so
+            // we don't have stetho as a dependency on dev
+            java.srcDirs += 'src/debugDev/java'
+            java.srcDirs += 'src/dev/java'
+        }
+        androidTest {
+            assets.srcDirs += 'src/androidTest/assets'
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    if (taskGraph.hasTask(':app-editor:assembleDebug') || taskGraph.hasTask(':app-editor:assembleAndroidTest')) {
+        setSigningConfig('debug')
+    }
+    if (taskGraph.hasTask(':app-editor:assembleDev')) {
+        setSigningConfig('dev')
+    }
+    if (taskGraph.hasTask(':app-editor:assembleRelease')) {
+        if (System.getenv('BUILDKITE') != 'true') {
+            // Don't just remove this check: only the build pipeline is guaranteed to be correct!
+            throw new GradleException("Use 'Android Release' pipeline on buildkite to build release APK.")
+        }
+        setSigningConfig('release')
+    }
+}
+
+/**
+ * Configures android.signingConfigs.config for a given buildType with values from gradle properties
+ * 'storePassword' and '(debug|dev|release)KeyPassword'.
+ * @param buildType , e.g. "dev" or "release"
+ */
+def setSigningConfig(buildType) {
+    android.signingConfigs[buildType].storePassword = storePassword
+    android.signingConfigs[buildType].keyPassword = project.getProperty("${buildType}KeyPassword")
+}
+
+// Note: build number is only used for dev and release
+def buildNumber() {
+    return System.getenv('BUILDKITE_BUILD_NUMBER') ?: getGitHash()
+}
+
+
+dependencies {
+    implementation project(':analytics')
+    implementation project(':billing-ui')
+    implementation project(':category')
+    implementation project(':dynamic-config')
+    implementation project(':environment')
+    implementation project(':export')
+    implementation project(':flag')
+    implementation project(':http-storage')
+    implementation project(':editor-ui')
+    implementation project(':common')
+    implementation project(':logger')
+    implementation project(':analytics')
+    implementation project(':document')
+    implementation project(':folder')
+    implementation project(':media')
+    implementation project(':storage')
+    implementation project(':db')
+    implementation project(':http')
+    implementation project(':font')
+    implementation project(':billing')
+    implementation project(':profile')
+    implementation project(':media')
+    implementation project(':search')
+    implementation project(':filter')
+    implementation project(':json')
+    implementation project(':gallery-store')
+    implementation project(':glide-wrapper')
+    implementation project(':common-ui')
+    implementation project(':doctype')
+    implementation project(':design-viewer-ui')
+    implementation project(':media-upload')
+    implementation project(':media-upload-service')
+
+    devImplementation project(':debugdrawer')
+    debugImplementation project(':debugdrawer')
+
+    implementation kotlinStdLib
+
+    compileOnly autoValue
+    kapt autoValue
+    kapt autoValueParcel
+    kapt autoValueWith
+    implementation circleIndicator
+    implementation dagger
+    implementation daggerAndroid
+    implementation daggerAndroidSupport
+    kapt daggerAndroidProcessor
+    kapt daggerCompiler
+    kapt dataBindingCompiler
+    implementation(rootProject.ext.crashlytics) { transitive = true }
+    implementation firebaseMessaging
+    implementation facebookSdk
+    implementation glide
+    implementation groupie
+    implementation groupieDataBinding
+    implementation playServices
+    implementation rx
+    implementation rxBindingKotlin
+    implementation segmentAppboy
+    implementation supportAnnotations
+    implementation supportAppCompat
+    implementation supportDesign
+    implementation supportCardView
+    implementation supportGridLayout
+    implementation supportMultidex
+    implementation okHttp
+    implementation okHttpLoggingInterceptor
+    implementation retrofit
+    implementation retrofitJackson
+    implementation retrofitRxJava2
+    implementation rxLifecycle
+    implementation rxLifecycleComponents
+    implementation branchIo
+    implementation constraintLayout
+    implementation lifecycleCommon
+
+    debugImplementation leakCanary
+    debugImplementation stetho
+    debugImplementation traceur
+
+    devImplementation leakCanaryNoOp
+
+    releaseImplementation leakCanaryNoOp
+
+    testImplementation project(':common-test')
+    testImplementation unitTestDeps
+    testImplementation robolectric
+    // Robolectric 3.1.4 does not mock OpenGL on API 23.
+    // Workaround: https://github.com/robolectric/robolectric/issues/1932
+    // TODO(Andrew G) remove this when it is fixed (or robolectric adds API 24 support)
+    // TODO(Andrew G) AND/OR modify/delete "sdk=23" in src/test/resources/robolectric.properties
+    testImplementation openglApi
+
+    androidTestImplementation findBugs
+    androidTestImplementation supportAnnotations
+    androidTestImplementation kotlinReflect
+    androidTestImplementation kotlinMockito
+    androidTestImplementation mockitoAndroid
+    androidTestImplementation espresso
+    androidTestImplementation supportMultidex
+}
+
+// must be at the end of the file following the setup instructions:
+// https://firebase.google.com/docs/android/setup#manually_add_firebase
+apply plugin: 'com.google.gms.google-services'
+
+androidExtensions {
+    experimental = true
+}
